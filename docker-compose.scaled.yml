@@ -1,0 +1,143 @@
+# docker-compose.scaled.yml — three-instance mini-exchange cluster
+#
+# Usage:
+#   docker compose -f docker-compose.scaled.yml up --build
+#
+# Architecture:
+#   nginx (port 80) → app-1 / app-2 / app-3
+#   NATS             cross-instance event fan-out + engine order routing
+#   Redis            cache-aside (NATS is primary; Redis PubSub unused here)
+#   PostgreSQL       durable order / trade storage
+#
+# Partitioning:
+#   PARTITION_ENABLED=true splits the stock universe across 3 instances using
+#   consistent FNV-1a hashing.  Each instance only starts a matching-engine
+#   goroutine for its own stocks.  Orders for non-owned stocks are forwarded
+#   via NATS queue groups to the owning instance.
+#
+# WebSocket stickiness:
+#   nginx routes /ws via ip_hash so a browser client always connects to the
+#   same instance.  NATS fan-out guarantees that instance still receives
+#   events produced by the other two instances.
+
+services:
+
+  # ── Infrastructure ───────────────────────────────────────────────────────────
+
+  nats:
+    image: nats:latest
+    command: ["--js"]
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: miniexchange
+      POSTGRES_USER: miniexchange
+      POSTGRES_PASSWORD: miniexchange
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./migrations:/docker-entrypoint-initdb.d
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U miniexchange"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # ── Application instances ────────────────────────────────────────────────────
+
+  app-1:
+    build: .
+    env_file: .env.docker
+    environment:
+      PARTITION_ENABLED: "true"
+      PARTITION_INSTANCE_INDEX: "0"
+      PARTITION_TOTAL_INSTANCES: "3"
+      STORAGE_TYPE: "postgres"
+    depends_on:
+      nats:
+        condition: service_started
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/healthz || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  app-2:
+    build: .
+    env_file: .env.docker
+    environment:
+      PARTITION_ENABLED: "true"
+      PARTITION_INSTANCE_INDEX: "1"
+      PARTITION_TOTAL_INSTANCES: "3"
+      STORAGE_TYPE: "postgres"
+    depends_on:
+      nats:
+        condition: service_started
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/healthz || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  app-3:
+    build: .
+    env_file: .env.docker
+    environment:
+      PARTITION_ENABLED: "true"
+      PARTITION_INSTANCE_INDEX: "2"
+      PARTITION_TOTAL_INSTANCES: "3"
+      STORAGE_TYPE: "postgres"
+    depends_on:
+      nats:
+        condition: service_started
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/healthz || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  # ── nginx load balancer ──────────────────────────────────────────────────────
+
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "8081:80"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      app-1:
+        condition: service_healthy
+      app-2:
+        condition: service_healthy
+      app-3:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  pgdata:
