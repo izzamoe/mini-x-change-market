@@ -12,7 +12,7 @@
 ### 1. Clone Repository
 
 ```bash
-git clone <repository-url>
+git clone git@github.com:izzamoe/mini-x-change-market.git
 cd mini-exchange
 ```
 
