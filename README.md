@@ -813,10 +813,4 @@ Complete documentation in `docs/` folder:
 
 ---
 
-## 📝 License
-
-MIT License — see LICENSE file
-
----
-
 Built with ❤️ using Go, Goroutines, and Channels.
