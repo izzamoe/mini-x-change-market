@@ -1,7 +1,6 @@
 # Mini Exchange — Realtime Trading System
 
 [![Go Version](https://img.shields.io/badge/go-1.25+-blue.svg)](https://golang.org)
-[![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
 A production-quality matching engine and WebSocket broadcast server written in Go. Built as a technical interview project demonstrating clean architecture, concurrency mastery, and real-time streaming.
 
