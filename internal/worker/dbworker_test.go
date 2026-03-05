@@ -149,3 +149,29 @@ func TestDBWorker_ConcurrentEnqueue(t *testing.T) {
 	// Verify no panics — exact count varies due to queue size.
 	t.Logf("enqueued %d / %d ops", enqueued.Load(), goroutines*opsPerGoroutine)
 }
+
+func TestDBWorker_EnqueueAfterStop(t *testing.T) {
+	w := newTestWorker(10, 10*time.Millisecond)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		w.Start(ctx)
+		close(done)
+	}()
+
+	// Enqueue some ops
+	order := &entity.Order{ID: "o1"}
+	err := w.Enqueue(WriteOp{Type: OpOrderSave, Payload: order})
+	require.NoError(t, err)
+
+	// Stop the worker
+	w.Stop()
+	cancel()
+	<-done
+
+	// Try to enqueue after stop - should return error, not panic
+	err = w.Enqueue(WriteOp{Type: OpOrderSave, Payload: order})
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "stopped")
+}

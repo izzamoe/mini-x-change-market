@@ -36,7 +36,7 @@ type Meta struct {
 }
 
 // JSON writes a JSON-encoded value with the given HTTP status code.
-func JSON(w http.ResponseWriter, status int, data interface{}) {
+func JSON(w http.ResponseWriter, status int, data any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(envelope{
@@ -46,7 +46,7 @@ func JSON(w http.ResponseWriter, status int, data interface{}) {
 }
 
 // Paginated writes a JSON-encoded paginated list response.
-func Paginated(w http.ResponseWriter, status int, data interface{}, meta Meta) {
+func Paginated(w http.ResponseWriter, status int, data any, meta Meta) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(envelope{

@@ -13,6 +13,8 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -45,6 +47,9 @@ type DBWorker struct {
 	flushInterval time.Duration
 	retryMax      int
 	retryBackoff  time.Duration
+	wg            sync.WaitGroup
+	stopOnce      sync.Once
+	stopped       atomic.Bool // ← Baru: flag untuk cek status
 }
 
 // DBWorkerConfig holds the configuration for a DBWorker.
@@ -81,12 +86,21 @@ func NewDBWorker(pool *pgxpool.Pool, cfg DBWorkerConfig) *DBWorker {
 }
 
 // Enqueue submits a WriteOp to the worker's channel without blocking.
-// Returns an error if the channel is full (back-pressure signal).
+// Returns an error if the channel is full or the worker is stopped.
 func (w *DBWorker) Enqueue(op WriteOp) error {
+	// Cek dulu kalau worker sudah di-stop
+	if w.stopped.Load() {
+		return errors.New("db worker stopped")
+	}
+
 	select {
 	case w.writeCh <- op:
 		return nil
 	default:
+		// Double-check race condition
+		if w.stopped.Load() {
+			return errors.New("db worker stopped")
+		}
 		return errors.New("db worker queue full")
 	}
 }
@@ -96,9 +110,12 @@ func (w *DBWorker) QueueLen() int {
 	return len(w.writeCh)
 }
 
-// Start runs the worker loop until ctx is cancelled.
+// Start runs the worker loop until ctx is cancelled or Stop() is called.
 // It is designed to run in its own goroutine.
 func (w *DBWorker) Start(ctx context.Context) {
+	w.wg.Add(1)
+	defer w.wg.Done()
+
 	batch := make([]WriteOp, 0, w.batchSize)
 	ticker := time.NewTicker(w.flushInterval)
 	defer ticker.Stop()
@@ -239,4 +256,18 @@ func (w *DBWorker) flush(ctx context.Context, ops []WriteOp) error {
 		}
 	}
 	return nil
+}
+
+// Stop signals the worker to shut down and waits for all pending operations
+// to be flushed to PostgreSQL. It is safe to call multiple times.
+// This method must be called before closing the PostgreSQL connection pool.
+func (w *DBWorker) Stop() {
+	w.stopOnce.Do(func() {
+		// Set flag dulu sebelum close channel
+		// Biar Enqueue() yang dipanggil concurrently bisa lihat stopped=true
+		w.stopped.Store(true)
+		close(w.writeCh)
+		w.wg.Wait()
+		slog.Info("db worker stopped gracefully")
+	})
 }

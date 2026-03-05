@@ -382,21 +382,26 @@ func main() {
 	}
 	// d) Drain and stop the event bus.
 	eventBus.Stop()
-	// e) Flush NATS connections.
+	// e) Stop the DB worker and wait for all pending writes to complete.
+	// This must happen BEFORE closing the PostgreSQL connection pool.
+	if dbWorker != nil {
+		dbWorker.Stop()
+	}
+	// f) Flush NATS connections.
 	if natsPub != nil {
 		natsPub.Close()
 	}
 	if natsSub != nil {
 		natsSub.Close()
 	}
-	// f) Close Redis.
+	// g) Close Redis.
 	if redisCache != nil {
 		_ = redisCache.Close()
 	}
 	if redisPubSub != nil {
 		_ = redisPubSub.Close()
 	}
-	// g) Close Postgres pool.
+	// h) Close Postgres pool.
 	if pgPool != nil {
 		pgPool.Close()
 	}

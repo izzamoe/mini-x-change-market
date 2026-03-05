@@ -27,6 +27,9 @@ Dokumentasi lengkap untuk Mini Exchange - Realtime Trading System.
 ### 6. Horizontal Scaling
 - **[Horizontal Scaling](11-horizontal-scaling.md)** - Cara kerja horizontal scaling dengan NATS
 
+### 7. Bug Fixes & Improvements
+- **[Graceful Shutdown Fix](12-graceful-shutdown-fix.md)** - Fix race condition saat shutdown untuk mencegah data loss
+
 ---
 
 ## 🎯 Quick Reference
