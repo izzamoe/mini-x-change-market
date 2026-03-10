@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/coder/websocket"
+	"github.com/izzam/mini-exchange/internal/transport/http/middleware"
 )
 
 // Handler upgrades HTTP connections to WebSocket and hands them to the Hub.
@@ -27,10 +28,10 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Extract authenticated user from request context (populated by JWT middleware in Plan 8).
+	// Extract authenticated user from request context (populated by JWT middleware).
 	// Fall back to "anonymous" when auth middleware is absent.
 	userID := "anonymous"
-	if id, ok := r.Context().Value(userIDContextKey{}).(string); ok && id != "" {
+	if id, ok := middleware.UserIDFromContext(r.Context()); ok && id != "" {
 		userID = id
 	}
 
@@ -51,7 +52,3 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	go client.writePump()
 	go client.readPump()
 }
-
-// userIDContextKey is the unexported context key used by the JWT middleware
-// (Plan 8) to propagate the authenticated user ID.
-type userIDContextKey struct{}
