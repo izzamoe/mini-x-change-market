@@ -4,7 +4,7 @@
 
 A production-quality matching engine and WebSocket broadcast server written in Go. Built as a technical interview project demonstrating clean architecture, concurrency mastery, and real-time streaming.
 
-**Status: ✅ All Requirements from [rule.md](rule.md) COMPLETED (100%)**
+**Status: ✅ All Requirements COMPLETED (100%)**
 
 ---
 
@@ -808,7 +808,7 @@ Complete documentation in `docs/` folder:
 | **Clean Architecture** | ✅ Complete |
 | **Unit Tests** | ✅ Complete |
 
-**All 25+ requirements from rule.md completed! 🎉**
+**All 25+ requirements completed! 🎉**
 
 ---
 

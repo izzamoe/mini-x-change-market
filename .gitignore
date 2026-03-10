@@ -26,3 +26,7 @@ Thumbs.db
 
 # Build cache
 /tmp/
+
+# Internal / private files
+rule.md
+server

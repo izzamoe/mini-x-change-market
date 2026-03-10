@@ -34,7 +34,7 @@ Dokumentasi lengkap untuk Mini Exchange - Realtime Trading System.
 
 ## 🎯 Quick Reference
 
-### Requirements dari rule.md yang ter-cover:
+### Requirements yang ter-cover:
 
 | Requirement | Document |
 |------------|----------|
@@ -60,4 +60,4 @@ Baru pertama kali? Mulai dari:
 
 ---
 
-**Semua dokumentasi ini menjawab 100% requirement dari rule.md ✅**
+**Semua dokumentasi ini menjawab 100% requirement ✅**
