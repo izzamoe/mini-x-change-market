@@ -76,7 +76,7 @@ func (s *Service) CreateOrder(ctx context.Context, userID string, req CreateOrde
 		Type:      event.OrderCreated,
 		StockCode: order.StockCode,
 		UserID:    order.UserID,
-		Payload:   order,
+		Payload:   &snapshot,
 		Timestamp: now,
 	})
 

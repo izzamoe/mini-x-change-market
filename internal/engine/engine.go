@@ -19,6 +19,7 @@ type Engine struct {
 	tradeRepo  repository.TradeRepository
 	marketRepo repository.MarketRepository
 	wg         sync.WaitGroup
+	stopOnce   sync.Once
 }
 
 // NewEngine creates an Engine and initialises a Matcher for every stock.
@@ -58,10 +59,12 @@ func (e *Engine) Start(ctx context.Context) {
 // Stop closes each Matcher's channel (draining any queued orders) and
 // waits for all goroutines to exit. Idempotent.
 func (e *Engine) Stop() {
-	for _, m := range e.matchers {
-		close(m.ch)
-	}
-	e.wg.Wait()
+	e.stopOnce.Do(func() {
+		for _, m := range e.matchers {
+			close(m.ch)
+		}
+		e.wg.Wait()
+	})
 }
 
 // SubmitOrder routes an order to the correct stock's Matcher channel.

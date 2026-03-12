@@ -120,6 +120,30 @@ func (r *MarketRepo) GetAllTickers(_ context.Context) ([]*entity.Ticker, error) 
 	return result, nil
 }
 
+// UpdateTickerFromTrade performs an atomic read-modify-write using the write
+// lock, so the matching engine's mutation cannot race with a simulator update.
+// It applies trade price/qty via entity.Ticker.UpdateFromTrade and returns a
+// copy of the updated ticker.
+func (r *MarketRepo) UpdateTickerFromTrade(_ context.Context, stockCode string, price, qty int64) (*entity.Ticker, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	entry, ok := r.tickers[stockCode]
+	if !ok {
+		return nil, repository.ErrNotFound
+	}
+
+	// Load current snapshot, mutate, and store — all under the write lock.
+	current := entry.load()
+	if current == nil {
+		return nil, repository.ErrNotFound
+	}
+	updated := copyTicker(current)
+	updated.UpdateFromTrade(price, qty)
+	entry.store(updated)
+	return copyTicker(updated), nil
+}
+
 // UpdateTicker atomically replaces the ticker snapshot for a stock.
 func (r *MarketRepo) UpdateTicker(_ context.Context, ticker *entity.Ticker) error {
 	r.mu.RLock()

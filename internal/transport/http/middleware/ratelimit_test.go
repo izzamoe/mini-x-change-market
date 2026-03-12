@@ -10,7 +10,7 @@ import (
 )
 
 func TestRateLimiter_AllowsRequests(t *testing.T) {
-	rl := middleware.NewRateLimiter(10, 10)
+	rl := middleware.NewRateLimiter(10, 10, nil)
 
 	handler := rl.Middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -28,7 +28,7 @@ func TestRateLimiter_AllowsRequests(t *testing.T) {
 
 func TestRateLimiter_BlocksAfterBurst(t *testing.T) {
 	// 1 RPS, burst of 1 → second request from same IP must be throttled.
-	rl := middleware.NewRateLimiter(1, 1)
+	rl := middleware.NewRateLimiter(1, 1, nil)
 
 	handler := rl.Middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -50,7 +50,7 @@ func TestRateLimiter_BlocksAfterBurst(t *testing.T) {
 
 func TestRateLimiter_DifferentIPs_Independent(t *testing.T) {
 	// 1 RPS, burst of 1.
-	rl := middleware.NewRateLimiter(1, 1)
+	rl := middleware.NewRateLimiter(1, 1, nil)
 
 	handler := rl.Middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)

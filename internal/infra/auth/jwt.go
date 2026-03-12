@@ -85,14 +85,19 @@ func (s *Service) LoadUsers(ctx context.Context) error {
 
 // Register creates a new user with a bcrypt-hashed password.
 // Returns ErrUserExists if the username is taken.
-func (s *Service) Register(username, password string) (*entity.User, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	if _, exists := s.users[username]; exists {
+//
+// The mutex is held for map reads/writes only; bcrypt and PostgreSQL I/O
+// are performed outside the lock to avoid blocking concurrent logins.
+func (s *Service) Register(ctx context.Context, username, password string) (*entity.User, error) {
+	// 1. Quick duplicate check under a read lock (cheap).
+	s.mu.RLock()
+	_, exists := s.users[username]
+	s.mu.RUnlock()
+	if exists {
 		return nil, ErrUserExists
 	}
 
+	// 2. bcrypt outside any lock (~100 ms CPU).
 	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {
 		return nil, err
@@ -105,9 +110,9 @@ func (s *Service) Register(username, password string) (*entity.User, error) {
 		CreatedAt:    time.Now(),
 	}
 
-	// Persist to PostgreSQL when a repo is wired.
+	// 3. Persist to PostgreSQL outside the lock (network I/O).
 	if s.userRepo != nil {
-		if err := s.userRepo.Save(context.Background(), u); err != nil {
+		if err := s.userRepo.Save(ctx, u); err != nil {
 			if errors.Is(err, repository.ErrDuplicate) {
 				return nil, ErrUserExists
 			}
@@ -115,6 +120,15 @@ func (s *Service) Register(username, password string) (*entity.User, error) {
 		}
 	}
 
+	// 4. Write lock: re-check for duplicate (another goroutine may have raced)
+	//    then insert into both maps.
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, exists := s.users[username]; exists {
+		// If we already persisted to PG above, the DB constraint will catch the
+		// duplicate and we can safely treat this as ErrUserExists.
+		return nil, ErrUserExists
+	}
 	s.users[username] = u
 	s.byID[u.ID] = u
 	return u, nil

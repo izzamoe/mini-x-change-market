@@ -125,6 +125,20 @@ func (r *stubMarketRepo) UpdateOrderBook(_ context.Context, _ *entity.OrderBook)
 	return nil
 }
 
+func (r *stubMarketRepo) UpdateTickerFromTrade(_ context.Context, stockCode string, price, qty int64) (*entity.Ticker, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	t, ok := r.tickers[stockCode]
+	if !ok {
+		return nil, repository.ErrNotFound
+	}
+	cp := *t
+	cp.UpdateFromTrade(price, qty)
+	r.tickers[stockCode] = &cp
+	result := cp
+	return &result, nil
+}
+
 func (r *stubMarketRepo) latest(code string) *entity.Ticker {
 	r.mu.Lock()
 	defer r.mu.Unlock()

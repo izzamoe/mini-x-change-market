@@ -67,12 +67,16 @@ func (m *Matcher) submit(o *entity.Order) bool {
 // run is the goroutine body. It exits when ch is closed.
 // Context is threaded through for storage calls but shutdown is
 // driven purely by closing m.ch so there is no dual-shutdown race.
+// Storage operations use context.Background() so that a cancelled ctx
+// (shutdown signal) does not abort in-flight writes.
 func (m *Matcher) run(ctx context.Context) {
+	_ = ctx // kept for interface compatibility; storage uses background context
+	storageCtx := context.Background()
 	for o := range m.ch {
 		if o == nil {
 			continue
 		}
-		m.matchOrder(ctx, o)
+		m.matchOrder(storageCtx, o)
 	}
 }
 
@@ -170,6 +174,9 @@ func (m *Matcher) executeTrade(ctx context.Context, buy, sell *entity.Order, qty
 	}
 	if err := m.tradeRepo.Save(ctx, trade); err != nil {
 		slog.Error("matcher: failed to save trade", "err", err, "stock", m.stockCode)
+		// Do not fill orders when trade persistence failed — the trade would
+		// be lost but the orders' filled quantities would be inconsistent.
+		return
 	}
 
 	// Update both orders.
@@ -210,15 +217,12 @@ func (m *Matcher) executeTrade(ctx context.Context, buy, sell *entity.Order, qty
 }
 
 // updateTicker refreshes the market ticker snapshot after a trade.
+// It uses UpdateTickerFromTrade to perform an atomic read-modify-write,
+// eliminating the TOCTOU race with the simulator goroutine.
 func (m *Matcher) updateTicker(ctx context.Context, price, qty int64) {
-	ticker, err := m.marketRepo.GetTicker(ctx, m.stockCode)
+	ticker, err := m.marketRepo.UpdateTickerFromTrade(ctx, m.stockCode, price, qty)
 	if err != nil {
-		slog.Error("matcher: failed to get ticker", "err", err, "stock", m.stockCode)
-		return
-	}
-	ticker.UpdateFromTrade(price, qty)
-	if err := m.marketRepo.UpdateTicker(ctx, ticker); err != nil {
-		slog.Error("matcher: failed to update ticker", "err", err, "stock", m.stockCode)
+		slog.Error("matcher: failed to update ticker from trade", "err", err, "stock", m.stockCode)
 		return
 	}
 	m.bus.Publish(event.Event{

@@ -58,7 +58,7 @@ func (c *Client) readPump() {
 
 		var msg ClientMessage
 		if err := json.Unmarshal(data, &msg); err != nil {
-			c.hub.sendJSON(c, ServerMessage{Type: "error", Message: "invalid JSON"})
+			c.hub.SendJSONSafe(c, ServerMessage{Type: "error", Message: "invalid JSON"})
 			continue
 		}
 		c.handleMessage(msg)
@@ -85,6 +85,7 @@ func (c *Client) writePump() {
 			cancel()
 			if err != nil {
 				slog.Debug("ws write error", "ip", c.ip, "err", err)
+				c.conn.CloseNow() // force-close TCP so the client detects disconnection
 				return
 			}
 
@@ -94,6 +95,7 @@ func (c *Client) writePump() {
 			cancel()
 			if err != nil {
 				slog.Debug("ws ping failed", "ip", c.ip, "err", err)
+				c.conn.CloseNow() // force-close TCP so the client detects disconnection
 				return
 			}
 		}
@@ -126,10 +128,10 @@ func (c *Client) handleMessage(msg ClientMessage) {
 		}
 
 	case "ping":
-		c.hub.sendJSON(c, ServerMessage{Type: "pong"})
+		c.hub.SendJSONSafe(c, ServerMessage{Type: "pong"})
 
 	default:
-		c.hub.sendJSON(c, ServerMessage{
+		c.hub.SendJSONSafe(c, ServerMessage{
 			Type:    "error",
 			Message: "unknown action: " + msg.Action,
 		})

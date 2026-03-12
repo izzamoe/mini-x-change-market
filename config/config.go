@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -101,6 +102,13 @@ type WebSocketConfig struct {
 	MaxConnections            int
 	MaxConnectionsPerIP       int
 	MaxSubscriptionsPerClient int
+	// TrustedProxyCIDRs is a comma-separated list of CIDR blocks for trusted
+	// reverse proxies.  When the direct connection originates from one of these
+	// CIDRs, X-Forwarded-For is trusted for real-IP extraction.
+	TrustedProxyCIDRs []string
+	// AllowedOrigins is a list of Origin patterns accepted during the WebSocket
+	// handshake.  If empty, the library's default (same-host check) applies.
+	AllowedOrigins []string
 }
 
 type LogConfig struct {
@@ -172,6 +180,8 @@ func Load() *Config {
 			MaxConnections:            getInt("WS_MAX_CONNECTIONS", 1000),
 			MaxConnectionsPerIP:       getInt("WS_MAX_CONNECTIONS_PER_IP", 10),
 			MaxSubscriptionsPerClient: getInt("WS_MAX_SUBSCRIPTIONS_PER_CLIENT", 20),
+			TrustedProxyCIDRs:         getStringSlice("WS_TRUSTED_PROXY_CIDRS", nil),
+			AllowedOrigins:            getStringSlice("WS_ALLOWED_ORIGINS", nil),
 		},
 		Log: LogConfig{
 			Level:  getEnv("LOG_LEVEL", "info"),
@@ -264,4 +274,24 @@ func getDuration(key string, defaultVal time.Duration) time.Duration {
 		return defaultVal
 	}
 	return d
+}
+
+// getStringSlice returns a slice of non-empty strings split by comma from the
+// environment variable key. Returns defaultVal if the variable is unset or empty.
+func getStringSlice(key string, defaultVal []string) []string {
+	v := os.Getenv(key)
+	if v == "" {
+		return defaultVal
+	}
+	parts := strings.Split(v, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if s := strings.TrimSpace(p); s != "" {
+			out = append(out, s)
+		}
+	}
+	if len(out) == 0 {
+		return defaultVal
+	}
+	return out
 }

@@ -1,28 +1,37 @@
 package ws
 
 import (
+	"net"
 	"net/http"
-	"strings"
 
 	"github.com/coder/websocket"
 	"github.com/izzam/mini-exchange/internal/transport/http/middleware"
+	"github.com/izzam/mini-exchange/pkg/netutil"
 )
 
 // Handler upgrades HTTP connections to WebSocket and hands them to the Hub.
 type Handler struct {
-	hub *Hub
+	hub            *Hub
+	trustedCIDRs   []*net.IPNet
+	allowedOrigins []string
 }
 
 // NewHandler creates a Handler backed by the given Hub.
-func NewHandler(hub *Hub) *Handler {
-	return &Handler{hub: hub}
+// trustedCIDRs: upstream proxy CIDRs whose X-Forwarded-For is trusted for IP extraction.
+// allowedOrigins: origin patterns passed to websocket.AcceptOptions.OriginPatterns;
+// if empty, the connection origin is validated against the Host header (library default).
+func NewHandler(hub *Hub, trustedCIDRs []*net.IPNet, allowedOrigins []string) *Handler {
+	return &Handler{hub: hub, trustedCIDRs: trustedCIDRs, allowedOrigins: allowedOrigins}
 }
 
 // ServeHTTP implements http.Handler.
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{
-		InsecureSkipVerify: true, // allow all origins; restrict in production via OriginPatterns
-	})
+	opts := &websocket.AcceptOptions{}
+	if len(h.allowedOrigins) > 0 {
+		opts.OriginPatterns = h.allowedOrigins
+	}
+
+	conn, err := websocket.Accept(w, r, opts)
 	if err != nil {
 		// websocket.Accept has already written an error response.
 		return
@@ -35,15 +44,8 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		userID = id
 	}
 
-	// Use the forwarded IP if available (behind a proxy), otherwise use RemoteAddr.
-	ip := r.Header.Get("X-Forwarded-For")
-	if ip == "" {
-		ip = r.RemoteAddr
-	}
-	// Strip port from RemoteAddr ("host:port" → "host").
-	if idx := strings.LastIndex(ip, ":"); idx != -1 && !strings.Contains(ip, "[") {
-		ip = ip[:idx]
-	}
+	// Use netutil for safe, proxy-aware IP extraction.
+	ip := netutil.ExtractClientIP(r, h.trustedCIDRs)
 
 	client := NewClient(conn, h.hub, userID, ip)
 	h.hub.register <- client

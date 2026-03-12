@@ -31,16 +31,26 @@ type orderEntry struct {
 // NOT goroutine-safe — must only be accessed from a single Matcher goroutine.
 type orderBook struct {
 	stockCode string
-	bids      []*orderEntry // highest bid first
-	asks      []*orderEntry // lowest ask first
+	bids      []*orderEntry       // highest bid first
+	asks      []*orderEntry       // lowest ask first
+	index     map[string]struct{} // set of all order IDs currently in the book (dedup guard)
 }
 
 func newOrderBook(stockCode string) *orderBook {
-	return &orderBook{stockCode: stockCode}
+	return &orderBook{
+		stockCode: stockCode,
+		index:     make(map[string]struct{}),
+	}
 }
 
 // addOrder inserts a resting order into the correct side, maintaining sort order.
+// It is a no-op if the order ID is already in the book (duplicate-submission guard).
 func (ob *orderBook) addOrder(o *entity.Order) {
+	if _, exists := ob.index[o.ID]; exists {
+		// Duplicate: this order ID is already resting in the book.
+		return
+	}
+	ob.index[o.ID] = struct{}{}
 	entry := &orderEntry{order: o, remaining: o.RemainingQuantity()}
 
 	switch o.Side {
@@ -61,6 +71,7 @@ func (ob *orderBook) addOrder(o *entity.Order) {
 
 // removeOrder deletes a fully-filled or cancelled order from the book.
 func (ob *orderBook) removeOrder(orderID string) {
+	delete(ob.index, orderID)
 	ob.bids = removeEntry(ob.bids, orderID)
 	ob.asks = removeEntry(ob.asks, orderID)
 }
@@ -102,6 +113,11 @@ func (ob *orderBook) getDepth(levels int) *entity.OrderBook {
 
 // aggregateLevels collapses individual order entries into PriceLevel aggregates.
 // The input slice must already be in the correct sort order.
+//
+// Cap semantics: the guard `len(levels) >= maxLevels` is intentionally placed
+// in the "new price level" branch only.  Orders that share a price with the
+// last-accepted level are always aggregated into it, which is correct — we
+// never split a single price level across the cap boundary.
 func aggregateLevels(entries []*orderEntry, maxLevels int) []entity.PriceLevel {
 	var levels []entity.PriceLevel
 

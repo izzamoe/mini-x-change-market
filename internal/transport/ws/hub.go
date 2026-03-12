@@ -32,6 +32,14 @@ type broadcastMsg struct {
 	data []byte
 }
 
+// directSendReq asks the Hub to send a single message to one client.
+// This ensures the send happens inside the Hub's goroutine — safe from races
+// with Hub.removeClient which closes client.send.
+type directSendReq struct {
+	client *Client
+	msg    ServerMessage
+}
+
 // Hub is the central coordinator for all WebSocket clients.
 // A single goroutine (Run) owns all internal state — no mutexes needed.
 type Hub struct {
@@ -41,6 +49,7 @@ type Hub struct {
 	subscribe   chan subscribeReq
 	unsubscribe chan unsubscribeReq
 	broadcast   chan broadcastMsg
+	directSend  chan directSendReq // serialised single-client sends
 
 	// state — ONLY accessed inside Run goroutine
 	clients    map[*Client]bool                  // all connected clients
@@ -57,6 +66,7 @@ func NewHub() *Hub {
 		subscribe:   make(chan subscribeReq, 64),
 		unsubscribe: make(chan unsubscribeReq, 64),
 		broadcast:   make(chan broadcastMsg, 256),
+		directSend:  make(chan directSendReq, 256),
 
 		clients:    make(map[*Client]bool),
 		subs:       make(map[Subscription]map[*Client]bool),
@@ -128,18 +138,26 @@ func (h *Hub) Run(ctx context.Context) {
 				Stock:   sub.Stock,
 			})
 
+		case req := <-h.directSend:
+			// Single-client send requested from an external goroutine (e.g. readPump).
+			// Handled here inside the Hub goroutine so it is safe w.r.t. close(client.send).
+			if h.clients[req.client] {
+				h.sendJSON(req.client, req.msg)
+			}
+
 		case msg := <-h.broadcast:
-			// Iterate only the clients subscribed to this exact subscription.
-			// Non-blocking send: a slow client is kicked immediately.
-			// It is safe to delete from h.subs[msg.sub] while ranging over it
-			// because removeClient deletes the *client* key, not the outer key.
+			// Collect slow clients first to avoid modifying the map while ranging.
+			var toKick []*Client
 			for client := range h.subs[msg.sub] {
 				select {
 				case client.send <- msg.data:
 				default:
 					slog.Warn("ws slow client kicked", "ip", client.ip)
-					h.removeClient(client)
+					toKick = append(toKick, client)
 				}
+			}
+			for _, client := range toKick {
+				h.removeClient(client)
 			}
 
 		case <-ctx.Done():
@@ -198,6 +216,7 @@ func (h *Hub) BroadcastToUser(channel, userID string, payload interface{}) {
 }
 
 // sendJSON marshals msg and does a non-blocking send to client.send.
+// Must only be called from inside the Hub's Run goroutine.
 func (h *Hub) sendJSON(client *Client, msg ServerMessage) {
 	data, err := json.Marshal(msg)
 	if err != nil {
@@ -205,6 +224,15 @@ func (h *Hub) sendJSON(client *Client, msg ServerMessage) {
 	}
 	select {
 	case client.send <- data:
+	default:
+	}
+}
+
+// SendJSONSafe enqueues a single-client message to be sent by the Hub goroutine.
+// It is safe to call from any goroutine (e.g. readPump).
+func (h *Hub) SendJSONSafe(client *Client, msg ServerMessage) {
+	select {
+	case h.directSend <- directSendReq{client: client, msg: msg}:
 	default:
 	}
 }

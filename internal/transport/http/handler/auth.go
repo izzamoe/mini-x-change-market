@@ -49,7 +49,7 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	u, err := h.svc.Register(req.Username, req.Password)
+	u, err := h.svc.Register(r.Context(), req.Username, req.Password)
 	if err != nil {
 		if errors.Is(err, auth.ErrUserExists) {
 			response.Error(w, http.StatusConflict, "USER_EXISTS", "username already taken")

@@ -35,9 +35,10 @@ type EventBus struct {
 	mu   sync.RWMutex
 	subs map[event.Type][]subscription
 
-	ch   chan event.Event
-	done chan struct{}
-	once sync.Once
+	ch       chan event.Event
+	done     chan struct{}
+	once     sync.Once // guards Start
+	stopOnce sync.Once // guards Stop
 }
 
 // NewEventBus constructs an EventBus. Call Start() before publishing events.
@@ -100,9 +101,12 @@ func (b *EventBus) Start() {
 
 // Stop signals the dispatch goroutine to stop and drains remaining events.
 // It blocks until all buffered events have been delivered.
+// Safe to call multiple times; subsequent calls are no-ops.
 func (b *EventBus) Stop() {
-	close(b.ch)
-	<-b.done
+	b.stopOnce.Do(func() {
+		close(b.ch)
+		<-b.done
+	})
 }
 
 // dispatch is the single goroutine that delivers events to subscribers.

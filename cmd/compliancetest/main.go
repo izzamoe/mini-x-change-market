@@ -410,8 +410,14 @@ func (r *runner) runREST() {
 func (r *runner) runMatching() {
 	sec := "MATCHING ENGINE"
 
+	// Use TLKM (base price 3500, tick 25) — no other test tool places orders for
+	// this stock, so the book is always clean. This avoids cross-contamination
+	// from stale BBCA orders left by loadtest/matchtest/wsloadtest/stresstest.
+	const matchStock = "TLKM"
+	const matchPrice = 3500.0
+
 	// Place a fresh BUY to test acceptance
-	buyID, buyStatus, err := r.placeOrder(r.buyerToken, "BBCA", "BUY", 9500, 100)
+	buyID, buyStatus, err := r.placeOrder(r.buyerToken, matchStock, "BUY", matchPrice, 100)
 	if err != nil || buyID == "" {
 		r.add(fail(sec, "BUY order accepted by engine", fmt.Sprintf("err=%v", err)))
 		// stub remaining checks
@@ -423,7 +429,7 @@ func (r *runner) runMatching() {
 	r.add(pass(sec, "BUY order accepted by engine", fmt.Sprintf("id=%s status=%s", buyID, buyStatus)))
 
 	// Place a matching SELL and check attempt
-	sellID, sellStatus, err := r.placeOrder(r.sellerToken, "BBCA", "SELL", 9500, 100)
+	sellID, sellStatus, err := r.placeOrder(r.sellerToken, matchStock, "SELL", matchPrice, 100)
 	if err != nil || sellID == "" {
 		r.add(fail(sec, "SELL order accepted, match attempted", fmt.Sprintf("err=%v", err)))
 	} else {
@@ -504,7 +510,7 @@ func (r *runner) runMatching() {
 	}
 
 	// Orderbook endpoint reflects match (after match, both sides should be cleared)
-	_, obResp, err := r.doJSON("GET", "/api/v1/market/orderbook/BBCA", "", nil)
+	_, obResp, err := r.doJSON("GET", "/api/v1/market/orderbook/"+matchStock, "", nil)
 	if err != nil {
 		r.add(fail(sec, "Orderbook endpoint reachable after match", err.Error()))
 	} else {
@@ -547,11 +553,11 @@ func (r *runner) runMatching() {
 		wg.Add(1)
 		go func(idx int) {
 			defer wg.Done()
-			bID, _, err := r.placeOrder(buyTokens[idx], "BBCA", "BUY", 9500, 100)
+			bID, _, err := r.placeOrder(buyTokens[idx], matchStock, "BUY", matchPrice, 100)
 			if err != nil || bID == "" {
 				return
 			}
-			sID, _, err := r.placeOrder(sellTokens[idx], "BBCA", "SELL", 9500, 100)
+			sID, _, err := r.placeOrder(sellTokens[idx], matchStock, "SELL", matchPrice, 100)
 			if err != nil || sID == "" {
 				return
 			}
@@ -603,11 +609,11 @@ func (r *runner) runMatching() {
 		pfSellerToken = r.sellerToken
 	}
 
-	pfBuyID, _, err := r.placeOrder(pfBuyerToken, "BBCA", "BUY", 9500, 200)
+	pfBuyID, _, err := r.placeOrder(pfBuyerToken, matchStock, "BUY", matchPrice, 200)
 	if err != nil {
 		r.add(bonusFail(sec, "[bonus] Partial fill: BUY 200 + SELL 100 → partial fill", err.Error()))
 	} else {
-		pfSellID, _, err := r.placeOrder(pfSellerToken, "BBCA", "SELL", 9500, 100)
+		pfSellID, _, err := r.placeOrder(pfSellerToken, matchStock, "SELL", matchPrice, 100)
 		if err != nil {
 			r.add(bonusFail(sec, "[bonus] Partial fill: BUY 200 + SELL 100 → partial fill", err.Error()))
 		} else {

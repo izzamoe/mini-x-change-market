@@ -20,7 +20,7 @@ func startTestServer(t *testing.T) (*httptest.Server, *Hub, context.CancelFunc) 
 	hub := NewHub()
 	ctx, cancel := context.WithCancel(context.Background())
 	go hub.Run(ctx)
-	handler := NewHandler(hub)
+	handler := NewHandler(hub, nil, nil)
 	srv := httptest.NewServer(handler)
 	t.Cleanup(srv.Close)
 	return srv, hub, cancel

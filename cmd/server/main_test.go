@@ -73,7 +73,7 @@ func buildTestServer(t *testing.T, ctx context.Context) *httptest.Server {
 	wireEvents(ctx, eventBus, hub, nil, nil, nil, nil)
 
 	// Router
-	wsHandler := ws.NewHandler(hub)
+	wsHandler := ws.NewHandler(hub, nil, nil)
 	router := httptransport.NewRouter(httptransport.RouterDeps{
 		OrderSvc:  orderSvc,
 		TradeSvc:  tradeSvc,

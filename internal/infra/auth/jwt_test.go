@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -15,7 +16,7 @@ func newTestService(t *testing.T) *Service {
 
 func TestRegister_Success(t *testing.T) {
 	svc := newTestService(t)
-	u, err := svc.Register("alice", "password123")
+	u, err := svc.Register(context.Background(), "alice", "password123")
 	require.NoError(t, err)
 	assert.Equal(t, "alice", u.Username)
 	assert.NotEmpty(t, u.ID)
@@ -24,15 +25,15 @@ func TestRegister_Success(t *testing.T) {
 
 func TestRegister_DuplicateUsername(t *testing.T) {
 	svc := newTestService(t)
-	_, err := svc.Register("bob", "pass1")
+	_, err := svc.Register(context.Background(), "bob", "pass1")
 	require.NoError(t, err)
-	_, err = svc.Register("bob", "pass2")
+	_, err = svc.Register(context.Background(), "bob", "pass2")
 	assert.ErrorIs(t, err, ErrUserExists)
 }
 
 func TestLogin_Success(t *testing.T) {
 	svc := newTestService(t)
-	_, err := svc.Register("carol", "secret")
+	_, err := svc.Register(context.Background(), "carol", "secret")
 	require.NoError(t, err)
 
 	token, expiresAt, err := svc.Login("carol", "secret")
@@ -43,7 +44,7 @@ func TestLogin_Success(t *testing.T) {
 
 func TestLogin_WrongPassword(t *testing.T) {
 	svc := newTestService(t)
-	_, err := svc.Register("dave", "correct")
+	_, err := svc.Register(context.Background(), "dave", "correct")
 	require.NoError(t, err)
 
 	_, _, err = svc.Login("dave", "wrong")
@@ -58,7 +59,7 @@ func TestLogin_UnknownUser(t *testing.T) {
 
 func TestValidateToken_Success(t *testing.T) {
 	svc := newTestService(t)
-	_, err := svc.Register("eve", "pass")
+	_, err := svc.Register(context.Background(), "eve", "pass")
 	require.NoError(t, err)
 
 	token, _, err := svc.Login("eve", "pass")
@@ -79,7 +80,7 @@ func TestValidateToken_InvalidSignature(t *testing.T) {
 func TestValidateToken_ExpiredToken(t *testing.T) {
 	// Service with -1 second expiry so the token is immediately expired.
 	svc := NewService("secret", -time.Second)
-	_, err := svc.Register("frank", "pass")
+	_, err := svc.Register(context.Background(), "frank", "pass")
 	require.NoError(t, err)
 
 	token, _, err := svc.Login("frank", "pass")
@@ -93,7 +94,7 @@ func TestValidateToken_WrongSecret(t *testing.T) {
 	svc1 := NewService("secret-A", time.Hour)
 	svc2 := NewService("secret-B", time.Hour)
 
-	_, err := svc1.Register("grace", "pass")
+	_, err := svc1.Register(context.Background(), "grace", "pass")
 	require.NoError(t, err)
 	token, _, err := svc1.Login("grace", "pass")
 	require.NoError(t, err)

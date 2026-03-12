@@ -75,7 +75,7 @@ func DefaultDBWorkerConfig() DBWorkerConfig {
 // NewDBWorker creates a DBWorker.  pool may be nil during testing to use the
 // no-op flush path.
 func NewDBWorker(pool *pgxpool.Pool, cfg DBWorkerConfig) *DBWorker {
-	return &DBWorker{
+	w := &DBWorker{
 		writeCh:       make(chan WriteOp, cfg.ChannelSize),
 		pool:          pool,
 		batchSize:     cfg.BatchSize,
@@ -83,24 +83,33 @@ func NewDBWorker(pool *pgxpool.Pool, cfg DBWorkerConfig) *DBWorker {
 		retryMax:      cfg.RetryMax,
 		retryBackoff:  cfg.RetryBackoff,
 	}
+	// Pre-increment the WaitGroup before Start() is launched so that Stop()
+	// can safely call wg.Wait() at any time without racing against wg.Add.
+	w.wg.Add(1)
+	return w
 }
 
 // Enqueue submits a WriteOp to the worker's channel without blocking.
 // Returns an error if the channel is full or the worker is stopped.
-func (w *DBWorker) Enqueue(op WriteOp) error {
-	// Cek dulu kalau worker sudah di-stop
+func (w *DBWorker) Enqueue(op WriteOp) (err error) {
+	// Fast path: worker already stopped before we try anything.
 	if w.stopped.Load() {
 		return errors.New("db worker stopped")
 	}
+
+	// Guard against the race where Stop() closes writeCh between the
+	// stopped.Load() check above and the channel send below.
+	// A send on a closed channel panics; we recover and return an error.
+	defer func() {
+		if r := recover(); r != nil {
+			err = errors.New("db worker stopped")
+		}
+	}()
 
 	select {
 	case w.writeCh <- op:
 		return nil
 	default:
-		// Double-check race condition
-		if w.stopped.Load() {
-			return errors.New("db worker stopped")
-		}
 		return errors.New("db worker queue full")
 	}
 }
@@ -113,18 +122,22 @@ func (w *DBWorker) QueueLen() int {
 // Start runs the worker loop until ctx is cancelled or Stop() is called.
 // It is designed to run in its own goroutine.
 func (w *DBWorker) Start(ctx context.Context) {
-	w.wg.Add(1)
+	// wg.Add(1) was called in NewDBWorker; defer the corresponding Done here.
 	defer w.wg.Done()
 
 	batch := make([]WriteOp, 0, w.batchSize)
 	ticker := time.NewTicker(w.flushInterval)
 	defer ticker.Stop()
 
+	// Use a background context for storage writes so that a cancelled ctx
+	// (shutdown signal) does not abort in-flight flush operations.
+	flushCtx := context.Background()
+
 	flush := func(ops []WriteOp) {
 		if len(ops) == 0 {
 			return
 		}
-		if err := w.flushWithRetry(ctx, ops); err != nil {
+		if err := w.flushWithRetry(flushCtx, ops); err != nil {
 			slog.Error("db worker flush failed", "error", err, "ops", len(ops))
 		}
 	}
@@ -133,7 +146,7 @@ func (w *DBWorker) Start(ctx context.Context) {
 		select {
 		case op, ok := <-w.writeCh:
 			if !ok {
-				// Channel closed — drain complete.
+				// Channel closed by Stop() — drain complete, flush and exit.
 				flush(batch)
 				return
 			}
@@ -148,26 +161,11 @@ func (w *DBWorker) Start(ctx context.Context) {
 			batch = batch[:0]
 
 		case <-ctx.Done():
-			// Stop accepting new ops and drain whatever is buffered.
-			flush(batch)
-			batch = batch[:0]
-
-			// Drain channel without blocking.
-		drain:
-			for {
-				select {
-				case op := <-w.writeCh:
-					batch = append(batch, op)
-					if len(batch) >= w.batchSize {
-						flush(batch)
-						batch = batch[:0]
-					}
-				default:
-					break drain
-				}
-			}
-			flush(batch)
-			return
+			// Context cancelled — signal Stop() to close the channel so we
+			// drain via the channel-close path above. Do NOT return here;
+			// items may still be enqueued between now and the close.
+			// Stop() is idempotent so calling it here is safe.
+			go w.Stop()
 		}
 	}
 }

@@ -35,6 +35,7 @@ import (
 	"github.com/izzam/mini-exchange/internal/transport/http/middleware"
 	"github.com/izzam/mini-exchange/internal/transport/ws"
 	"github.com/izzam/mini-exchange/internal/worker"
+	"github.com/izzam/mini-exchange/pkg/netutil"
 	pkgpartition "github.com/izzam/mini-exchange/pkg/partition"
 )
 
@@ -325,13 +326,15 @@ func main() {
 	}
 
 	// 22. Initialise optional rate limiter.
+	// Parse trusted proxy CIDRs once; shared by rate limiter and WS handler.
+	trustedCIDRs := netutil.ParseCIDRs(cfg.WebSocket.TrustedProxyCIDRs)
 	var rateLimiter *middleware.RateLimiter
 	if cfg.RateLimit.Enabled {
-		rateLimiter = middleware.NewRateLimiter(cfg.RateLimit.RPS, cfg.RateLimit.Burst)
+		rateLimiter = middleware.NewRateLimiter(cfg.RateLimit.RPS, cfg.RateLimit.Burst, trustedCIDRs)
 	}
 
 	// 23. Build the HTTP router.
-	wsHandler := ws.NewHandler(hub)
+	wsHandler := ws.NewHandler(hub, trustedCIDRs, cfg.WebSocket.AllowedOrigins)
 	router := httptransport.NewRouter(httptransport.RouterDeps{
 		OrderSvc:    orderSvc,
 		TradeSvc:    tradeSvc,
@@ -374,9 +377,13 @@ func main() {
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		slog.Error("http shutdown error", "error", err)
 	}
-	// b) Stop the matching engine (drains queued orders).
+	// b) Stop the rate limiter's cleanup goroutine.
+	if rateLimiter != nil {
+		rateLimiter.Stop()
+	}
+	// c) Stop the matching engine (drains queued orders).
 	eng.Stop()
-	// c) Stop the simulator.
+	// d) Stop the simulator.
 	if sim != nil {
 		sim.Stop()
 	}
@@ -483,7 +490,8 @@ func wireEvents(
 		if o, ok := e.Payload.(*entity.Order); ok {
 			middleware.Metrics.OrdersCreatedTotal.WithLabelValues(o.StockCode, string(o.Side)).Inc()
 			if dbw != nil {
-				_ = dbw.Enqueue(worker.WriteOp{Type: worker.OpOrderSave, Payload: o})
+				orderCopy := *o // copy before enqueue — engine may mutate the original
+				_ = dbw.Enqueue(worker.WriteOp{Type: worker.OpOrderSave, Payload: &orderCopy})
 			}
 		}
 	})
@@ -502,7 +510,8 @@ func wireEvents(
 			}
 		}
 		if dbw != nil {
-			_ = dbw.Enqueue(worker.WriteOp{Type: worker.OpOrderUpdate, Payload: o})
+			orderCopy := *o // copy before enqueue — engine may mutate the original
+			_ = dbw.Enqueue(worker.WriteOp{Type: worker.OpOrderUpdate, Payload: &orderCopy})
 		}
 	})
 }

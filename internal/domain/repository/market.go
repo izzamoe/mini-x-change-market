@@ -18,6 +18,13 @@ type MarketRepository interface {
 	// UpdateTicker atomically replaces the ticker snapshot for a stock.
 	UpdateTicker(ctx context.Context, ticker *entity.Ticker) error
 
+	// UpdateTickerFromTrade performs an atomic read-modify-write on the ticker
+	// for a stock, applying the trade price and quantity via Ticker.UpdateFromTrade.
+	// This eliminates the TOCTOU race between the matching engine (which reads
+	// the ticker, mutates it, then writes it back) and the simulator (which
+	// writes a fresh ticker at any time).  Returns the updated ticker on success.
+	UpdateTickerFromTrade(ctx context.Context, stockCode string, price, qty int64) (*entity.Ticker, error)
+
 	// GetOrderBook returns the current order book snapshot for a stock.
 	GetOrderBook(ctx context.Context, stockCode string) (*entity.OrderBook, error)
 
